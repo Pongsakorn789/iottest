@@ -1,0 +1,58 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+logs
+*.log
+
+# macOS / Windows system files
+.DS_Store
+Thumbs.db
+*.pem
+
+# local env files
+backend/.env
+.env
+.env.*
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# Next.js / Vite / React
+.next/
+.out/
+.vite/
+
+# Jest test coverage
+coverage/
+
+# Package manager lock files 
+pnpm-lock.yaml
+yarn.lock
+
+# VS Code settings
+.vscode/
