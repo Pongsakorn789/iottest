@@ -17,18 +17,20 @@ import { LineChart } from "react-native-chart-kit";
 import { Dropdown } from "react-native-element-dropdown";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useRouter, useNavigation } from "expo-router";
+import { useNavigation } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 const windowWidth = Dimensions.get("window").width;
 const windowHeight = Dimensions.get("window").height;
 const isIOS = Platform.OS === 'ios';
-const API_URL = "http://192.168.1.12:3000/api/user/sensor-data";
+const API_URL = "http://172.16.22.142:3000/api/user/sensor-data";
 
 export default function Statistics() {
   const navigation = useNavigation();
-  const [selectedMetrics, setSelectedMetrics] = useState(["Temperature", "Humidity", "Dew Point"]);
-  const [selectedSensor, setSelectedSensor] = useState(null);
+  const [selectedMetrics, setSelectedMetrics] = useState(["Temperature", "Humidity", "Dew Point", "VPO"]);
+  const [selectedSensor, setSelectedSensor] = useState("Sensor IBS-TH3");
   const [startDate, setStartDate] = useState(new Date());
   const [endDate, setEndDate] = useState(new Date());
   const [tempStartDate, setTempStartDate] = useState(new Date());
@@ -58,81 +60,18 @@ export default function Statistics() {
 
     fetchSensorData(today.toISOString().split("T")[0], today.toISOString().split("T")[0]);
 
-    // ปรับขนาดกราฟตามข้อมูล
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const updateChartWidth = () => {
       const minWidth = windowWidth * 0.9;
       const dataPoints = data.length;
       const calculatedWidth = Math.max(minWidth, dataPoints * 80);
       setChartWidth(calculatedWidth);
     };
-
     updateChartWidth();
-
-    return () => clearInterval(interval);
   }, [data.length]);
-
-  const calculateDewPoint = (temperature, humidity) => {
-    if (temperature === null || humidity === null) return null;
-    
-    // คำนวณ Dew Point โดยใช้สูตรที่แม่นยำมากขึ้น
-    const a = 17.27;
-    const b = 237.7;
-    const alpha = ((a * temperature) / (b + temperature)) + Math.log(humidity / 100);
-    return (b * alpha) / (a - alpha);
-  };
-
-  const calculateHourlyAverages = (data) => {
-    const hourlyData = {};
-
-    data.forEach((item) => {
-      const date = new Date(item.timestamp);
-      const hour = date.getHours();
-      const key = `${hour}:00`;
-
-      if (!hourlyData[key]) {
-        hourlyData[key] = {
-          temperature: 0,
-          humidity: 0,
-          dewPoint: 0,
-          count: 0,
-        };
-      }
-
-      if (item.temperature !== null) {
-        hourlyData[key].temperature += item.temperature;
-        hourlyData[key].count += 1;
-      }
-      if (item.humidity !== null) {
-        hourlyData[key].humidity += item.humidity;
-      }
-    });
-
-    const averagedData = Object.keys(hourlyData)
-      .sort((a, b) => {
-        // เรียงตามชั่วโมง
-        const hourA = parseInt(a.split(':')[0]);
-        const hourB = parseInt(b.split(':')[0]);
-        return hourA - hourB;
-      })
-      .map((hour) => {
-        const avgTemperature = hourlyData[hour].count
-          ? hourlyData[hour].temperature / hourlyData[hour].count
-          : 0;
-        const avgHumidity = hourlyData[hour].count
-          ? hourlyData[hour].humidity / hourlyData[hour].count
-          : 0;
-        const dewPoint = calculateDewPoint(avgTemperature, avgHumidity);
-
-        return {
-          hour,
-          temperature: parseFloat(avgTemperature.toFixed(1)),
-          humidity: parseFloat(avgHumidity.toFixed(1)),
-          dewPoint: dewPoint ? parseFloat(dewPoint.toFixed(1)) : 0,
-        };
-      });
-
-    return averagedData;
-  };
 
   const fetchSensorData = async (start, end) => {
     try {
@@ -151,20 +90,85 @@ export default function Statistics() {
       const result = await response.json();
       if (response.ok) {
         if (!result.data || !Array.isArray(result.data)) {
-          Alert.alert("Error", "No sensor data available.");
+          Alert.alert("Error", "No sensor data available for the selected date range.");
           setData([]);
         } else {
-          const averagedData = calculateHourlyAverages(result.data);
-          console.log("Averaged Data:", averagedData);
-          setData(averagedData);
+          const sortedData = result.data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          console.log("Fetched Data:", sortedData);
+          setData(sortedData);
         }
       } else {
         Alert.alert("Error", result.message || "Failed to fetch sensor data.");
+        setData([]);
       }
     } catch (err) {
       Alert.alert("Error", "Network error occurred: " + err.message);
+      setData([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportPress = async () => {
+    if (data.length === 0) {
+      Alert.alert("Error", "No data available to export.");
+      return;
+    }
+
+    const htmlContent = `
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; color: #333; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #888; }
+          </style>
+        </head>
+        <body>
+          <h1>Sensor Data Report</h1>
+          <p>Sensor: ${selectedSensor}</p>
+          <p>Date Range: ${formatDate(startDate)} - ${formatDate(endDate)}</p>
+          <table>
+            <tr>
+              <th>Timestamp</th>
+              ${selectedMetrics.includes("Temperature") ? "<th>Temperature (°C)</th>" : ""}
+              ${selectedMetrics.includes("Humidity") ? "<th>Humidity (%)</th>" : ""}
+              ${selectedMetrics.includes("Dew Point") ? "<th>Dew Point (°C)</th>" : ""}
+              ${selectedMetrics.includes("VPO") ? "<th>VPO</th>" : ""}
+            </tr>
+            ${data.map(item => `
+              <tr>
+                <td>${new Date(item.timestamp).toLocaleString('th-TH')}</td>
+                ${selectedMetrics.includes("Temperature") ? `<td>${item.temperature || "N/A"}</td>` : ""}
+                ${selectedMetrics.includes("Humidity") ? `<td>${item.humidity || "N/A"}</td>` : ""}
+                ${selectedMetrics.includes("Dew Point") ? `<td>${item.dew_point || "N/A"}</td>` : ""}
+                ${selectedMetrics.includes("VPO") ? `<td>${item.vpo || "N/A"}</td>` : ""}
+              </tr>
+            `).join('')}
+          </table>
+          <div class="footer">Generated on ${formatDate(new Date())} ${formatTime(new Date())}</div>
+        </body>
+      </html>
+    `;
+
+    try {
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false,
+      });
+
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share PDF Report',
+        UTI: 'com.adobe.pdf',
+      });
+
+      Alert.alert("Success", "PDF exported successfully!");
+    } catch (error) {
+      Alert.alert("Error", "Failed to export PDF: " + error.message);
     }
   };
 
@@ -186,8 +190,8 @@ export default function Statistics() {
 
   const confirmStartDate = () => {
     setStartDate(tempStartDate);
-    fetchSensorData(tempStartDate.toISOString().split("T")[0], endDate.toISOString().split("T")[0]);
     setShowStartPicker(false);
+    setShowEndPicker(true);
   };
 
   const confirmEndDate = () => {
@@ -201,12 +205,14 @@ export default function Statistics() {
     setShowEndPicker(false);
   };
 
-  const handleGoBack = () => {
-    navigation.goBack();
-  };
-
   const chartData = {
-    labels: data.map((item) => item.hour),
+    labels: data.map((item) => {
+      const date = new Date(item.timestamp);
+      const daysDiff = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1;
+      return daysDiff <= 2
+        ? date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+        : date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit' });
+    }),
     datasets: [
       selectedMetrics.includes("Temperature") && {
         data: data.map((item) => item.temperature || 0),
@@ -219,8 +225,13 @@ export default function Statistics() {
         strokeWidth: 3,
       },
       selectedMetrics.includes("Dew Point") && {
-        data: data.map((item) => item.dewPoint || 0),
+        data: data.map((item) => item.dew_point || 0),
         color: (opacity = 1) => `rgba(75, 192, 192, ${opacity})`,
+        strokeWidth: 3,
+      },
+      selectedMetrics.includes("VPO") && {
+        data: data.map((item) => item.vpo || 0),
+        color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})`,
         strokeWidth: 3,
       },
     ].filter(Boolean),
@@ -231,13 +242,12 @@ export default function Statistics() {
     ? chartData
     : {
         ...chartData,
-        datasets: [{ data: [0, 0, 0, 0, 0, 0, 0], color: () => "transparent" }],
+        datasets: [{ data: [0, 0, 0], color: () => "transparent" }],
       };
 
   const formatDate = (date) => {
     if (!date) return "";
-    // รูปแบบวันที่ dd/mm/yyyy ในรูปแบบไทย เช่น 02/03/2568 BE
-    const thaiYear = date.getFullYear() + 543; // แปลงเป็นปี พ.ศ.
+    const thaiYear = date.getFullYear() + 543;
     return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${thaiYear} BE`;
   };
 
@@ -276,7 +286,13 @@ export default function Statistics() {
           />
         </View>
 
-        <Text style={styles.dateRangeText}>SELECT DATE RANGE</Text>
+        <View style={styles.dateExportContainer}>
+          <Text style={styles.dateRangeText}>SELECT DATE RANGE</Text>
+          <TouchableOpacity style={styles.exportButton} onPress={handleExportPress}>
+            <FontAwesome5 name="download" size={16} color="#fff" style={styles.exportIcon} />
+            <Text style={styles.exportText}>Export Data</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.datePickerContainer}>
           <TouchableOpacity
@@ -295,7 +311,6 @@ export default function Statistics() {
           </TouchableOpacity>
         </View>
 
-        {/* Modal สำหรับ Start Date Picker */}
         <Modal visible={showStartPicker} transparent animationType="slide">
           <View style={styles.modalContainer}>
             <View style={styles.pickerContainer}>
@@ -318,7 +333,6 @@ export default function Statistics() {
           </View>
         </Modal>
 
-        {/* Modal สำหรับ End Date Picker */}
         <Modal visible={showEndPicker} transparent animationType="slide">
           <View style={styles.modalContainer}>
             <View style={styles.pickerContainer}>
@@ -342,7 +356,7 @@ export default function Statistics() {
         </Modal>
 
         <View style={styles.metricContainer}>
-          {["Temperature", "Humidity", "Dew Point"].map((metric) => (
+          {["Temperature", "Humidity", "Dew Point", "VPO"].map((metric) => (
             <TouchableOpacity
               key={metric}
               onPress={() => toggleMetric(metric)}
@@ -354,7 +368,9 @@ export default function Statistics() {
                       ? "#FF6384"
                       : metric === "Humidity"
                       ? "#36A2EB"
-                      : "#4BC0C0",
+                      : metric === "Dew Point"
+                      ? "#4BC0C0"
+                      : "#22C55E",
                 },
               ]}
             >
@@ -364,7 +380,9 @@ export default function Statistics() {
                     ? "thermometer-half"
                     : metric === "Humidity"
                     ? "tint"
-                    : "cloud"
+                    : metric === "Dew Point"
+                    ? "cloud"
+                    : "wind"
                 }
                 size={14}
                 color="#fff"
@@ -380,6 +398,8 @@ export default function Statistics() {
             <ActivityIndicator size="large" color="#007AFF" />
             <Text style={styles.loadingText}>Loading data...</Text>
           </View>
+        ) : data.length === 0 ? (
+          <Text style={styles.noDataText}>No data available for the selected date range.</Text>
         ) : (
           <View style={styles.chartOuterContainer}>
             <ScrollView 
@@ -398,23 +418,10 @@ export default function Statistics() {
                   decimalPlaces: 1,
                   color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
                   labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                  style: {
-                    borderRadius: 16,
-                  },
-                  propsForDots: {
-                    r: "5",
-                    strokeWidth: "2",
-                    stroke: "#fff",
-                  },
-                  propsForBackgroundLines: {
-                    strokeDasharray: "5, 5",
-                    strokeWidth: 1,
-                    stroke: "#e0e0e0",
-                  },
-                  propsForLabels: {
-                    fontSize: 11,
-                    fontWeight: "bold",
-                  },
+                  style: { borderRadius: 16 },
+                  propsForDots: { r: "5", strokeWidth: "2", stroke: "#fff" },
+                  propsForBackgroundLines: { strokeDasharray: "5, 5", strokeWidth: 1, stroke: "#e0e0e0" },
+                  propsForLabels: { fontSize: 11, fontWeight: "bold" },
                   formatYLabel: (value) => value,
                 }}
                 bezier
@@ -452,6 +459,12 @@ export default function Statistics() {
                   <Text style={styles.legendText}>Dew Point</Text>
                 </View>
               )}
+              {selectedMetrics.includes("VPO") && (
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendColor, { backgroundColor: "#22C55E" }]} />
+                  <Text style={styles.legendText}>VPO</Text>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -484,7 +497,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingTop: 10,
   },
-  
   headerTitle: {
     fontSize: 24,
     fontWeight: "bold",
@@ -492,7 +504,7 @@ const styles = StyleSheet.create({
     textAlign: "left",
   },
   placeholder: {
-    width: 44, 
+    width: 44,
   },
   currentDateText: {
     fontSize: 14,
@@ -527,11 +539,32 @@ const styles = StyleSheet.create({
     height: 40,
     fontSize: 16,
   },
+  dateExportContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
   dateRangeText: {
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 12,
     color: "#333",
+  },
+  exportButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#28A745",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  exportIcon: {
+    marginRight: 6,
+  },
+  exportText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
   datePickerContainer: {
     flexDirection: "row",
@@ -562,6 +595,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 16,
     justifyContent: "center",
+    flexWrap: "wrap",
   },
   metricButton: {
     flexDirection: "row",
@@ -569,6 +603,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     marginHorizontal: 4,
+    marginBottom: 8,
     borderRadius: 24,
     backgroundColor: "#E5E7EB",
   },
@@ -599,7 +634,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   chartLegend: {
-    display: "none", 
+    display: "none",
   },
   legendContainer: {
     flexDirection: "row",
@@ -632,6 +667,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: "#555",
   },
+  noDataText: {
+    textAlign: 'center',
+    marginVertical: 16,
+    color: 'gray',
+  },
   footer: {
     marginTop: 16,
     marginBottom: 24,
@@ -642,7 +682,6 @@ const styles = StyleSheet.create({
     color: "#888",
     fontStyle: "italic",
   },
-
   modalContainer: {
     flex: 1,
     justifyContent: "center",

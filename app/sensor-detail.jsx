@@ -5,7 +5,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
-const API_URL = 'http://192.168.1.12:3000';
+const API_URL = 'http://172.16.22.142:3000';
 const screenWidth = Dimensions.get('window').width;
 const isIOS = Platform.OS === 'ios';
 

@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 
-const API_URL = 'http://192.168.1.12:3000';
+const API_URL = 'http://172.16.22.142:3000';
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
